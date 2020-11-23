@@ -5,6 +5,7 @@ Created on Wed Mar 22 19:04:10 2017
 
 @author: bernier2
 """
+from functools import partial
 import os
 import logging
 import multiprocessing
@@ -18,37 +19,7 @@ from hexrd.fitting import fitGrain, objFuncFitGrain, gFlag_ref
 logger = logging.getLogger(__name__)
 
 
-# multiprocessing fit funcs
-def fit_grain_FF_init(params):
-    """
-    Broadcast the fitting parameters as globals for multiprocessing
-
-    Parameters
-    ----------
-    params : dict
-        The dictionary of fitting parameters.
-
-    Returns
-    -------
-    None.
-
-    Notes
-    -----
-    See fit_grain_FF_reduced for specification.
-    """
-    global paramMP
-    paramMP = params
-
-
-def fit_grain_FF_cleanup():
-    """
-    Tears down the global fitting parameters.
-    """
-    global paramMP
-    del paramMP
-
-
-def fit_grain_FF_reduced(grain_id):
+def fit_grain_FF_reduced(grain_id, params):
     """
     Perform non-linear least-square fit for the specified grain.
 
@@ -77,20 +48,20 @@ def fit_grain_FF_reduced(grain_id):
     [plane_data, instrument, imgser_dict,
     tth_tol, eta_tol, ome_tol, npdiv, threshold]
     """
-    grains_table = paramMP['grains_table']
-    plane_data = paramMP['plane_data']
-    instrument = paramMP['instrument']
-    imgser_dict = paramMP['imgser_dict']
-    tth_tol = paramMP['tth_tol']
-    eta_tol = paramMP['eta_tol']
-    ome_tol = paramMP['ome_tol']
-    npdiv = paramMP['npdiv']
-    refit = paramMP['refit']
-    threshold = paramMP['threshold']
-    eta_ranges = paramMP['eta_ranges']
-    ome_period = paramMP['ome_period']
-    analysis_dirname = paramMP['analysis_dirname']
-    prefix = paramMP['spots_filename']
+    grains_table = params['grains_table']
+    plane_data = params['plane_data']
+    instrument = params['instrument']
+    imgser_dict = params['imgser_dict']
+    tth_tol = params['tth_tol']
+    eta_tol = params['eta_tol']
+    ome_tol = params['ome_tol']
+    npdiv = params['npdiv']
+    refit = params['refit']
+    threshold = params['threshold']
+    eta_ranges = params['eta_ranges']
+    ome_period = params['ome_period']
+    analysis_dirname = params['analysis_dirname']
+    prefix = params['spots_filename']
     spots_filename = None if prefix is None else prefix % grain_id
 
     grain = grains_table[grain_id]
@@ -364,34 +335,21 @@ def fit_grains(cfg,
     # =====================================================================
 
     # DO FIT!
+    fit_input = np.array(grains_table[:, 0], dtype=int)
     if len(grains_table) == 1 or ncpus == 1:
         logger.info("\tstarting serial fit")
         start = timeit.default_timer()
-        fit_grain_FF_init(params)
-        fit_results = list(
-            map(fit_grain_FF_reduced,
-                np.array(grains_table[:, 0], dtype=int))
-        )
-        fit_grain_FF_cleanup()
+        fit_results = [fit_grain_FF_reduced(x, params) for x in fit_input]
         elapsed = timeit.default_timer() - start
     else:
         nproc = min(ncpus, len(grains_table))
-        chunksize = max(1, len(grains_table)//ncpus)
+        chunksize = max(1, len(grains_table) // ncpus)
         logger.info("\tstarting fit on %d processes with chunksize %d",
                     nproc, chunksize)
         start = timeit.default_timer()
-        pool = multiprocessing.Pool(
-            nproc,
-            fit_grain_FF_init,
-            (params, )
-        )
-        fit_results = pool.map(
-            fit_grain_FF_reduced,
-            np.array(grains_table[:, 0], dtype=int),
-            chunksize=chunksize
-        )
-        pool.close()
-        pool.join()
+        with multiprocessing.Pool(nproc) as p:
+            f = partial(fit_grain_FF_reduced, params=params)
+            fit_results = p.map(f, fit_input, chunksize=chunksize)
         elapsed = timeit.default_timer() - start
     logger.info("fitting took %f seconds", elapsed)
     return fit_results
