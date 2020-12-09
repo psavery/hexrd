@@ -252,8 +252,8 @@ class Material(object):
 
         # make sure the space group is present in the cif file, either as
         # international table number, hermann-maguain or hall symbol
-        sgkey = ['_space_group_IT_number', 
-                 '_symmetry_space_group_name_h-m', 
+        sgkey = ['_space_group_IT_number',
+                 '_symmetry_space_group_name_h-m',
                  '_symmetry_space_group_name_hall',
                  '_symmetry_Int_Tables_number']
 
@@ -693,15 +693,19 @@ def loadMaterialList(cfgFile):
     return matList
 
 
+def material_names(f):
+    """Get all material names in an HDF5 file."""
+    with h5py.File(f, 'r') as rf:
+        return list(rf)
+
+
 def load_materials_hdf5(f, dmin=Material.DFLT_DMIN, kev=Material.DFLT_KEV,
                         sgsetting=Material.DFLT_SGSETTING):
     """Load materials from an HDF5 file
 
     The file uses the HDF5 file format.
     """
-    with h5py.File(f, 'r') as rf:
-        names = list(rf)
-
+    names = material_names(f)
     return {
         name: Material(name, f, dmin=dmin, kev=kev, sgsetting=sgsetting)
         for name in names
